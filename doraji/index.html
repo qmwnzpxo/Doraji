@@ -15,15 +15,37 @@
     </div>
 
     <div id="game-section" style="display:none;">
-        <div id="counter">0 / 10</div>
+        <div id="left">
+            <div id="counter">0 / 10</div>
 
-        <div id="bar-container">
-            <div id="bar"></div>
+            <div id="bar-container">
+                <div id="bar"></div>
+            </div>
+
+            <button class="big-btn" onclick="ButtonClick()">물 주기</button>
         </div>
 
-        <button class="big-btn" onclick="ButtonClick()">물 주기</button>
+        <div id="right">
+            <div id="collection"></div>
+        </div>
     </div>
     
     <script type="module" src="main.js"></script>
+
+    <div id="popup" style="
+        display:none;
+        position:fixed;
+        top:50%;
+        left:50%;
+        transform:translate(-50%, -50%);
+        background:white;
+        padding:20px;
+        border-radius:10px;
+        text-align:center;
+        box-shadow:0 0 20px rgba(0,0,0,0.3);
+    ">
+    <img id="popup-img" width="150"><br>
+    <div id="popup-text"></div>
+</div>
 </body>
 </html>
