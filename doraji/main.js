@@ -4,8 +4,21 @@
 import { db, auth, provider } from "./firebase.js";
 
 
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
+import {
+    doc, getDoc, setDoc, updateDoc,
+    collection, addDoc, getDocs, query, where,
+    arrayUnion, arrayRemove, serverTimestamp, writeBatch, onSnapshot
+} from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
 import { signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
+
+/////////////////////////////// 로그인, 친구 관련 변수 공간 ///////////////////////////////
+let unsubscribeFriendRequests = null;   // 친구요청
+let unsubscribeFriends = null;  // 친구
+let currentUser = null;
+let unsubscribeTradeRequests = null;    // 교환요청
+let unsubscribeActiveTrades = null;
+let currentTradeId = null;
+///////////////////////////////////////////////////////////////////////////////////////
 
 // 로그인 상태 감지 (페이지 열면 자동으로 로그인 유지)
 onAuthStateChanged(auth, async (user) => {
@@ -13,19 +26,49 @@ onAuthStateChanged(auth, async (user) => {
         console.log("user:", user); // 로그인 정보 확인
         currentUser = user;
         document.getElementById("user-info").innerText = " " + user.displayName;
-        document.getElementById("login-section").querySelector("button").style.display = "none";
-        document.getElementById("game-section").style.display = "block";
+        await ensureUserProfile(user);
+        document.getElementById("login-btn").style.display = "none";
+        document.getElementById("game-section").style.display = "flex";
+        document.getElementById("friend-section").style.display = "block";
         myCollection = await loadData();
         updateMaxCountByTime();
         renderCollection();
         startAutoGrow();
+        listenFriendRequests();
+        listenFriends();
+        listenTradeRequests();
+        listenActiveTrades();
         document.getElementById("logout-btn").style.display = "inline";
     } else {
     currentUser = null;
+
+    if (unsubscribeFriendRequests) {
+        unsubscribeFriendRequests();
+        unsubscribeFriendRequests = null;
+    }
+
+    if (unsubscribeFriends) {
+        unsubscribeFriends();
+        unsubscribeFriends = null;
+    }
+
+    if (unsubscribeTradeRequests) {
+    unsubscribeTradeRequests();
+    unsubscribeTradeRequests = null;
+    }
+    document.getElementById("trade-request-list").innerHTML = "";
+
+    if (unsubscribeActiveTrades) {
+        unsubscribeActiveTrades();
+        unsubscribeActiveTrades = null;
+    }
+    document.getElementById("active-trade-list").innerHTML = "";
+
     document.getElementById("user-info").innerText = "";
-    document.getElementById("login-section").querySelector("button").style.display = "block";
+    document.getElementById("login-btn").style.display = "inline-block";
     document.getElementById("game-section").style.display = "none";
     document.getElementById("logout-btn").style.display = "none";
+    document.getElementById("friend-section").style.display = "none";
     }
 });
 // 구글 로그인
@@ -41,7 +84,7 @@ window.Logout = async function() {
 async function saveData(data) {
     await setDoc(doc(db, "users", currentUser.uid), {
         collection: data
-    });
+    }, { merge: true });
 }
 // 불러오기 (내 uid로)
 async function loadData() {
@@ -63,7 +106,6 @@ import { dorajiList, gradeRates } from "./data.js";
 let count = 0;
 let maxCount = 10;
 let myCollection = [];
-let currentUser = null;
 let isRolling = false;
 
 // 버튼 함수
@@ -287,4 +329,725 @@ function updateMaxCountByTime() {
             count = maxCount;
         }
     }
+}
+
+// 유저 개인 프로필 저장 함수
+async function ensureUserProfile(user) {
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+        await setDoc(userRef, {
+            displayName: user.displayName || "이름없음",
+            friendCode: user.uid.slice(0, 8),
+            friends: []
+        });
+    } else {
+        const userData = userSnap.data();
+        const updateData = {};
+
+        if (!userData.displayName) {
+            updateData.displayName = user.displayName || "이름없음";
+        }
+        if (!userData.friendCode) {
+            updateData.friendCode = user.uid.slice(0, 8);
+        }
+        if (!userData.friends) {
+            updateData.friends = [];
+        }
+
+        if (Object.keys(updateData).length > 0) {
+            await setDoc(userRef, updateData, { merge: true });
+        }
+    }
+
+    const updatedSnap = await getDoc(userRef);
+    const updatedData = updatedSnap.data();
+
+    document.getElementById("my-friend-code").innerText = updatedData.friendCode;
+}
+
+// 친구 요청 보내기 함수
+window.SendFriendRequest = async function() {
+    if (!currentUser) return;
+
+    const friendCode = document.getElementById("friend-code-input").value.trim();
+    if (!friendCode) {
+        alert("친구코드를 입력하세요.");
+        return;
+    }
+
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, where("friendCode", "==", friendCode));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+        alert("해당 친구코드를 가진 유저가 없습니다.");
+        return;
+    }
+
+    const targetDoc = snap.docs[0];
+    const targetUid = targetDoc.id;
+    const targetData = targetDoc.data();
+
+    if (targetUid === currentUser.uid) {
+        alert("자기 자신에게는 요청할 수 없습니다.");
+        return;
+    }
+
+    const myDoc = await getDoc(doc(db, "users", currentUser.uid));
+    const myData = myDoc.data();
+
+    if ((myData.friends || []).includes(targetUid)) {
+        alert("이미 친구입니다.");
+        return;
+    }
+
+    const requestRef = collection(db, "friendRequests");
+
+    // 1) 내가 상대에게 이미 보낸 pending 요청 있는지
+    const sentQuery = query(
+        requestRef,
+        where("fromUid", "==", currentUser.uid),
+        where("toUid", "==", targetUid),
+        where("status", "==", "pending")
+    );
+    const sentSnap = await getDocs(sentQuery);
+
+    if (!sentSnap.empty) {
+        alert("이미 친구 요청을 보냈습니다.");
+        return;
+    }
+
+    // 2) 상대가 이미 나에게 pending 요청 보낸 상태인지
+    const receivedQuery = query(
+        requestRef,
+        where("fromUid", "==", targetUid),
+        where("toUid", "==", currentUser.uid),
+        where("status", "==", "pending")
+    );
+    const receivedSnap = await getDocs(receivedQuery);
+
+    if (!receivedSnap.empty) {
+        alert("상대가 이미 친구 요청을 보냈습니다. 받은 요청에서 수락하세요.");
+        return;
+    }
+
+    await addDoc(collection(db, "friendRequests"), {
+        fromUid: currentUser.uid,
+        fromName: currentUser.displayName || "이름없음",
+        toUid: targetUid,
+        toName: targetData.displayName || "이름없음",
+        status: "pending",
+        createdAt: serverTimestamp()
+    });
+
+    alert("친구 요청을 보냈습니다.");
+    document.getElementById("friend-code-input").value = "";
+}
+
+// 받은 요청 불러오기
+function listenFriendRequests() {
+    if (!currentUser) return;
+
+    const container = document.getElementById("friend-request-list");
+    if (!container) return;
+
+    if (unsubscribeFriendRequests) {
+        unsubscribeFriendRequests();
+    }
+
+    const q = query(
+        collection(db, "friendRequests"),
+        where("toUid", "==", currentUser.uid),
+        where("status", "==", "pending")
+    );
+
+    unsubscribeFriendRequests = onSnapshot(q, (snap) => {
+        container.innerHTML = "";
+
+        if (snap.empty) {
+            container.innerText = "받은 요청 없음";
+            return;
+        }
+
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+
+            const row = document.createElement("div");
+            row.innerHTML = `
+                <span>${data.fromName}</span>
+                <button onclick="AcceptFriendRequest('${docSnap.id}', '${data.fromUid}')">수락</button>
+                <button onclick="RejectFriendRequest('${docSnap.id}')">거절</button>
+            `;
+
+            container.appendChild(row);
+        });
+    });
+}
+
+// 친구 요청 수락 함수
+window.AcceptFriendRequest = async function(requestId, fromUid) {
+    if (!currentUser) return;
+
+    const requestRef = doc(db, "friendRequests", requestId);
+    const myRef = doc(db, "users", currentUser.uid);
+    const otherRef = doc(db, "users", fromUid);
+
+    const batch = writeBatch(db);
+
+    batch.update(myRef, {
+        friends: arrayUnion(fromUid)
+    });
+
+    batch.update(otherRef, {
+        friends: arrayUnion(currentUser.uid)
+    });
+
+    batch.update(requestRef, {
+        status: "accepted"
+    });
+
+    await batch.commit();
+
+    alert("친구 요청을 수락했습니다.");
+}
+
+// 친구 신청 거절 함수
+window.RejectFriendRequest = async function(requestId) {
+    if (!currentUser) return;
+
+    const requestRef = doc(db, "friendRequests", requestId);
+
+    await updateDoc(requestRef, {
+        status: "rejected"
+    });
+
+    alert("친구 요청을 거절했습니다.");
+}
+
+// 친구 목록 불러오기
+function listenFriends() {
+    if (!currentUser) return;
+
+    const container = document.getElementById("friend-list");
+    if (!container) return;
+
+    if (unsubscribeFriends) {
+        unsubscribeFriends();
+    }
+
+    const myRef = doc(db, "users", currentUser.uid);
+
+    unsubscribeFriends = onSnapshot(myRef, async (mySnap) => {
+        container.innerHTML = "";
+
+        if (!mySnap.exists()) {
+            container.innerText = "친구 없음";
+            return;
+        }
+
+        const myData = mySnap.data();
+        const friends = myData.friends || [];
+
+        if (friends.length === 0) {
+            container.innerText = "친구 없음";
+            return;
+        }
+
+        for (const friendUid of friends) {
+            const friendSnap = await getDoc(doc(db, "users", friendUid));
+            if (!friendSnap.exists()) continue;
+
+            const friendData = friendSnap.data();
+
+            const row = document.createElement("div");
+            row.innerHTML = `
+                <span>${friendData.displayName} (${friendData.friendCode})</span>
+                <button onclick="RequestTradeSession('${friendUid}', '${friendData.displayName}')">교환</button>
+                <button onclick="RemoveFriend('${friendUid}')">삭제</button>
+            `;
+            container.appendChild(row);
+        }
+    });
+}
+
+// 친구 삭제 함수
+window.RemoveFriend = async function(friendUid) {
+    if (!currentUser) return;
+
+    const myRef = doc(db, "users", currentUser.uid);
+    const otherRef = doc(db, "users", friendUid);
+
+    const batch = writeBatch(db);
+
+    batch.update(myRef, {
+        friends: arrayRemove(friendUid)
+    });
+
+    batch.update(otherRef, {
+        friends: arrayRemove(currentUser.uid)
+    });
+
+    await batch.commit();
+
+    alert("친구를 삭제했습니다.");
+}
+
+// 콜렉션 묶는 함수
+function getGroupedCollection(collectionData) {
+    const grouped = {};
+
+    collectionData.forEach(savedItem => {
+        const latestData = dorajiList.find(d => d.id === savedItem.id);
+        const finalItem = latestData ? latestData : savedItem;
+        const key = finalItem.id;
+
+        if (!grouped[key]) {
+            grouped[key] = {
+                ...finalItem,
+                count: 1
+            };
+        } else {
+            grouped[key].count++;
+        }
+    });
+
+    return Object.values(grouped);
+}
+
+// 내가 정말 그 도라지를 갖고있는가에 대한 함수
+function hasDoraji(collectionData, dorajiId, amount = 1) {
+    let count = 0;
+
+    for (const item of collectionData) {
+        if (item.id === dorajiId) {
+            count++;
+        }
+    }
+
+    return count >= amount;
+}
+
+// 교환요청 보내기 함수
+window.RequestTradeSession = async function(friendUid, friendName) {
+    if (!currentUser) return;
+
+    const allTradesSnap = await getDocs(collection(db, "trades"));
+
+    const alreadyExists = allTradesSnap.docs.some(docSnap => {
+        const data = docSnap.data();
+
+        if (data.type !== "friend") return false;
+        if (data.status !== "pending" && data.status !== "active") return false;
+
+        return (
+            (data.requesterUid === currentUser.uid && data.targetUid === friendUid) ||
+            (data.requesterUid === friendUid && data.targetUid === currentUser.uid)
+        );
+    });
+
+    if (alreadyExists) {
+        alert("이미 진행 중이거나 대기 중인 교환이 있습니다.");
+        return;
+    }
+
+    await addDoc(collection(db, "trades"), {
+        type: "friend",
+        status: "pending",
+        requesterUid: currentUser.uid,
+        requesterName: currentUser.displayName || "이름없음",
+        targetUid: friendUid,
+        targetName: friendName,
+        requesterOffer: [],
+        targetOffer: [],
+        requesterLocked: false,
+        targetLocked: false,
+        createdAt: serverTimestamp()
+    });
+
+    alert("교환 요청을 보냈습니다.");
+}
+
+// 받은 교환요청 실시간 표시
+function listenTradeRequests() {
+    if (!currentUser) return;
+
+    const container = document.getElementById("trade-request-list");
+    if (!container) return;
+
+    if (unsubscribeTradeRequests) {
+        unsubscribeTradeRequests();
+    }
+
+    const q = query(
+        collection(db, "trades"),
+        where("targetUid", "==", currentUser.uid),
+        where("status", "==", "pending"),
+        where("type", "==", "friend")
+    );
+
+    unsubscribeTradeRequests = onSnapshot(q, (snap) => {
+        container.innerHTML = "";
+
+        if (snap.empty) {
+            container.innerText = "받은 교환 요청 없음";
+            return;
+        }
+
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+
+            const row = document.createElement("div");
+            row.innerHTML = `
+                <span>${data.requesterName} 님의 교환 요청</span>
+                <button onclick="AcceptTradeRequest('${docSnap.id}')">수락</button>
+                <button onclick="RejectTradeRequest('${docSnap.id}')">거절</button>
+            `;
+
+            container.appendChild(row);
+        });
+    });
+}
+
+// 교환요청 수락 함수
+window.AcceptTradeRequest = async function(tradeId) {
+    if (!currentUser) return;
+
+    const tradeRef = doc(db, "trades", tradeId);
+
+    await updateDoc(tradeRef, {
+        status: "active"
+    });
+
+    alert("교환이 시작되었습니다.");
+}
+
+// 교환요청 거절 함수
+window.RejectTradeRequest = async function(tradeId) {
+    if (!currentUser) return;
+
+    const tradeRef = doc(db, "trades", tradeId);
+
+    await updateDoc(tradeRef, {
+        status: "rejected"
+    });
+
+    alert("교환 요청을 거절했습니다.");
+}
+
+// 메이플식 실시간 거래 함수
+function listenActiveTrades() {
+    if (!currentUser) return;
+
+    const container = document.getElementById("active-trade-list");
+    if (!container) return;
+
+    if (unsubscribeActiveTrades) {
+        unsubscribeActiveTrades();
+    }
+
+    unsubscribeActiveTrades = onSnapshot(collection(db, "trades"), (snap) => {
+        container.innerHTML = "";
+
+        const activeTrades = snap.docs.filter(docSnap => {
+            const data = docSnap.data();
+
+            if (data.type !== "friend") return false;
+            if (data.status !== "active") return false;
+
+            return data.requesterUid === currentUser.uid || data.targetUid === currentUser.uid;
+        });
+
+        if (activeTrades.length === 0) {
+            container.innerText = "진행 중인 교환 없음";
+            CloseTradeModal();
+            return;
+        }
+
+        activeTrades.forEach(docSnap => {
+            const data = docSnap.data();
+
+            const isRequester = data.requesterUid === currentUser.uid;
+            const otherName = isRequester ? data.targetName : data.requesterName;
+
+            const row = document.createElement("div");
+            row.innerHTML = `
+                <span>${otherName} 님과 진행 중인 교환</span>
+                <button onclick="openTradeModal('${docSnap.id}')">열기</button>
+            `;
+            container.appendChild(row);
+
+            if (currentTradeId === docSnap.id) {
+                renderTradeModal(docSnap.id, data);
+            }
+        });
+    });
+}
+
+// 거래 창에 도라지 올리기 함수
+window.AddDorajiToTrade = async function(tradeId) {
+    if (!currentUser) return;
+
+    const tradeRef = doc(db, "trades", tradeId);
+    const tradeSnap = await getDoc(tradeRef);
+
+    if (!tradeSnap.exists()) return;
+
+    const tradeData = tradeSnap.data();
+    const isRequester = tradeData.requesterUid === currentUser.uid;
+
+    if (tradeData.requesterLocked || tradeData.targetLocked) {
+        alert("이미 확인 단계입니다. 수정할 수 없습니다.");
+        return;
+    }
+
+    const myDoc = await getDoc(doc(db, "users", currentUser.uid));
+    const myData = myDoc.data();
+    const myCollectionData = myData.collection || [];
+
+    const grouped = getGroupedCollection(myCollectionData);
+
+    if (grouped.length === 0) {
+        alert("보유한 도라지가 없습니다.");
+        return;
+    }
+
+    const listText = grouped
+        .map(item => `${item.id}: ${item.name} (x${item.count})`)
+        .join("\n");
+
+    const input = prompt(`올릴 도라지 id를 입력하세요.\n\n${listText}`);
+    if (!input) return;
+
+    const dorajiId = Number(input);
+    if (Number.isNaN(dorajiId)) {
+        alert("올바른 id를 입력하세요.");
+        return;
+    }
+
+    const currentOffer = isRequester ? (tradeData.requesterOffer || []) : (tradeData.targetOffer || []);
+    const alreadyCount = currentOffer.filter(id => id === dorajiId).length;
+
+    if (!hasDoraji(myCollectionData, dorajiId, alreadyCount + 1)) {
+        alert("해당 도라지를 더 이상 올릴 수 없습니다.");
+        return;
+    }
+
+    const newOffer = [...currentOffer, dorajiId];
+
+    if (isRequester) {
+        await updateDoc(tradeRef, {
+            requesterOffer: newOffer,
+            requesterLocked: false,
+            targetLocked: false
+        });
+    } else {
+        await updateDoc(tradeRef, {
+            targetOffer: newOffer,
+            requesterLocked: false,
+            targetLocked: false
+        });
+    }
+}
+
+// 확인 버튼. 둘 다 확인하면 교환 실행.
+window.LockTrade = async function(tradeId) {
+    if (!currentUser) return;
+
+    const tradeRef = doc(db, "trades", tradeId);
+    const tradeSnap = await getDoc(tradeRef);
+
+    if (!tradeSnap.exists()) return;
+
+    const tradeData = tradeSnap.data();
+    const isRequester = tradeData.requesterUid === currentUser.uid;
+
+    if (isRequester) {
+        await updateDoc(tradeRef, {
+            requesterLocked: true
+        });
+    } else {
+        await updateDoc(tradeRef, {
+            targetLocked: true
+        });
+    }
+
+    const updatedSnap = await getDoc(tradeRef);
+    const updatedData = updatedSnap.data();
+
+    if (updatedData.requesterLocked && updatedData.targetLocked) {
+        await completeTrade(tradeId);
+    }
+}
+
+// 거래 완료 처리
+async function completeTrade(tradeId) {
+    const tradeRef = doc(db, "trades", tradeId);
+    const tradeSnap = await getDoc(tradeRef);
+
+    if (!tradeSnap.exists()) return;
+
+    const tradeData = tradeSnap.data();
+
+    const requesterRef = doc(db, "users", tradeData.requesterUid);
+    const targetRef = doc(db, "users", tradeData.targetUid);
+
+    const requesterSnap = await getDoc(requesterRef);
+    const targetSnap = await getDoc(targetRef);
+
+    if (!requesterSnap.exists() || !targetSnap.exists()) {
+        alert("유저 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    const requesterData = requesterSnap.data();
+    const targetData = targetSnap.data();
+
+    let requesterCollection = requesterData.collection || [];
+    let targetCollection = targetData.collection || [];
+
+    for (const dorajiId of tradeData.requesterOffer) {
+        if (!hasDoraji(requesterCollection, dorajiId, 1)) {
+            alert("요청자가 교환 도중 도라지를 잃었습니다.");
+            await updateDoc(tradeRef, { status: "cancelled" });
+            return;
+        }
+        requesterCollection = removeOneDoraji(requesterCollection, dorajiId);
+        targetCollection.push(dorajiList.find(d => d.id === dorajiId));
+    }
+
+    for (const dorajiId of tradeData.targetOffer) {
+        if (!hasDoraji(targetCollection, dorajiId, 1)) {
+            alert("상대가 교환 도중 도라지를 잃었습니다.");
+            await updateDoc(tradeRef, { status: "cancelled" });
+            return;
+        }
+        targetCollection = removeOneDoraji(targetCollection, dorajiId);
+        requesterCollection.push(dorajiList.find(d => d.id === dorajiId));
+    }
+
+    const batch = writeBatch(db);
+
+    batch.set(requesterRef, { collection: requesterCollection }, { merge: true });
+    batch.set(targetRef, { collection: targetCollection }, { merge: true });
+    batch.update(tradeRef, { status: "completed" });
+
+    await batch.commit();
+
+    if (currentUser.uid === tradeData.requesterUid) {
+        myCollection = requesterCollection;
+    } else if (currentUser.uid === tradeData.targetUid) {
+        myCollection = targetCollection;
+    }
+
+    renderCollection();
+    CloseTradeModal();
+    alert("교환이 완료되었습니다.");
+}
+
+// 거래 취소
+window.CancelTrade = async function(tradeId) {
+    if (!currentUser) return;
+
+    const tradeRef = doc(db, "trades", tradeId);
+
+    await updateDoc(tradeRef, {
+        status: "cancelled"
+    });
+
+    if (currentTradeId === tradeId) {
+        CloseTradeModal();
+    }
+
+    alert("교환을 취소했습니다.");
+}
+
+// 배열에서 특정 도라지 빼기
+function removeOneDoraji(collectionData, dorajiId) {
+    const newCollection = [...collectionData];
+    const index = newCollection.findIndex(item => item.id === dorajiId);
+
+    if (index !== -1) {
+        newCollection.splice(index, 1);
+    }
+
+    return newCollection;
+}
+
+// 거래창 열기
+window.openTradeModal = function(tradeId) {
+    currentTradeId = tradeId;
+    document.getElementById("trade-modal").style.display = "flex";
+}
+
+// 거래창 닫기
+window.CloseTradeModal = function() {
+    currentTradeId = null;
+    document.getElementById("trade-modal").style.display = "none";
+}
+
+// 거래창 내용 업데이트 함수
+function renderTradeModal(tradeId, tradeData) {
+    const isRequester = tradeData.requesterUid === currentUser.uid;
+
+    const myOffer = isRequester ? tradeData.requesterOffer : tradeData.targetOffer;
+    const otherOffer = isRequester ? tradeData.targetOffer : tradeData.requesterOffer;
+
+    const myLocked = isRequester ? tradeData.requesterLocked : tradeData.targetLocked;
+    const otherLocked = isRequester ? tradeData.targetLocked : tradeData.requesterLocked;
+
+    const otherName = isRequester ? tradeData.targetName : tradeData.requesterName;
+
+    document.getElementById("trade-modal-title").innerText = `${otherName} 님과의 교환`;
+
+    const mySlots = document.getElementById("my-trade-slots");
+    const otherSlots = document.getElementById("other-trade-slots");
+
+    mySlots.innerHTML = "";
+    otherSlots.innerHTML = "";
+
+    myOffer.forEach(id => {
+        const doraji = dorajiList.find(d => d.id === id);
+        if (!doraji) return;
+
+        const slot = document.createElement("div");
+        slot.className = "trade-slot";
+        slot.innerHTML = `
+            <img src="${doraji.img}">
+            <div>${doraji.name}</div>
+        `;
+        mySlots.appendChild(slot);
+    });
+
+    otherOffer.forEach(id => {
+        const doraji = dorajiList.find(d => d.id === id);
+        if (!doraji) return;
+
+        const slot = document.createElement("div");
+        slot.className = "trade-slot";
+        slot.innerHTML = `
+            <img src="${doraji.img}">
+            <div>${doraji.name}</div>
+        `;
+        otherSlots.appendChild(slot);
+    });
+
+    document.getElementById("my-trade-lock-state").innerText = myLocked ? "확인 완료" : "대기 중";
+    document.getElementById("other-trade-lock-state").innerText = otherLocked ? "확인 완료" : "대기 중";
+}
+
+// 현재 열려있는 거래에 맞춰 버튼 연결
+window.AddDorajiToCurrentTrade = async function() {
+    if (!currentTradeId) return;
+    await AddDorajiToTrade(currentTradeId);
+}
+window.LockCurrentTrade = async function() {
+    if (!currentTradeId) return;
+    await LockTrade(currentTradeId);
+}
+window.CancelCurrentTrade = async function() {
+    if (!currentTradeId) return;
+    await CancelTrade(currentTradeId);
+    CloseTradeModal();
 }

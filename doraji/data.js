@@ -24,7 +24,7 @@ export const dorajiList = [
     { id: 202, name: "리본 도라지", img: "img/rare/리본도라지.png", grade: "rare" },
     { id: 203, name: "붉은 도라지", img: "img/rare/붉은 도라지.png", grade: "rare" },
     { id: 204, name: "서핑 도라지", img: "img/rare/서핑도라지.png", grade: "rare" },
-    { id: 205, name: "선생님 도라지", img: "img/rare/선생님 도라지.png", grade: "rare" },
+    { id: 205, name: "선생님 도라지", img: "img/rare/선생님도라지.png", grade: "rare" },
 
     { id: 301, name: "양아치 도라지", img: "img/superRare/양아치도라지.png", grade: "superRare" },
     { id: 302, name: "요리사 도라지", img: "img/superRare/요리사도라지.png", grade: "superRare" },

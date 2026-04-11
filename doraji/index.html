@@ -8,29 +8,52 @@
 </head>
 
 <body>
-    <div id="login-section">
-        <button class="big-btn" onclick="Login()">구글 로그인</button>
+    <div id="top-bar">
+        <button id="login-btn" class="big-btn" onclick="Login()">구글 로그인</button>
         <span id="user-info"></span>
         <button onclick="Logout()" style="display:none;" id="logout-btn">로그아웃</button>
     </div>
 
-    <div id="game-section" style="display:none;">
-        <div id="left">
-            <div id="counter">0 / 10</div>
+    <div id="main-layout">
+        <div id="friend-section" style="display:none;">
+            <h3>친구</h3>
 
-            <div id="bar-container">
-                <div id="bar"></div>
+            <div>
+                내 친구코드: <span id="my-friend-code"></span>
             </div>
 
-            <button class="big-btn" onclick="ButtonClick()">물 주기</button>
+            <input type="text" id="friend-code-input" placeholder="친구코드 입력">
+            <button onclick="SendFriendRequest()">친구 요청 보내기</button>
+
+            <h4>받은 친구 요청</h4>
+            <div id="friend-request-list"></div>
+
+            <h4>친구 목록</h4>
+            <div id="friend-list"></div>
+
+            <h4>받은 교환 요청</h4>
+            <div id="trade-request-list"></div>
+
+            <h4>진행 중인 교환</h4>
+            <div id="active-trade-list"></div>
         </div>
 
-        <div id="right">
-            <div id="collection"></div>
+        <div id="game-section" style="display:none;">
+            <div id="left">
+                <div id="counter">0 / 10</div>
+
+                <div id="bar-container">
+                    <div id="bar"></div>
+                </div>
+
+                <button class="big-btn" onclick="ButtonClick()">물 주기</button>
+            </div>
+
+            <div id="right">
+                <div id="collection"></div>
+            </div>
         </div>
     </div>
-    
-    <script type="module" src="main.js"></script>
 
     <div id="popup" style="
         display:none;
@@ -44,8 +67,41 @@
         text-align:center;
         box-shadow:0 0 20px rgba(0,0,0,0.3);
     ">
-    <img id="popup-img" width="150"><br>
-    <div id="popup-text"></div>
-</div>
+        <img id="popup-img" width="150"><br>
+        <div id="popup-text"></div>
+    </div>
+
+    <div id="trade-modal" style="display:none;">
+        <div id="trade-modal-content">
+            <div id="trade-modal-header">
+                <span id="trade-modal-title">교환창</span>
+                <button onclick="CloseTradeModal()">X</button>
+            </div>
+
+            <div id="trade-modal-body">
+                <div class="trade-panel">
+                    <h3>내 거래</h3>
+                    <div id="my-trade-slots" class="trade-slots"></div>
+                    <button onclick="AddDorajiToCurrentTrade()">도라지 올리기</button>
+                    <div id="my-trade-lock-state">대기 중</div>
+                </div>
+
+                <div class="trade-center">↔</div>
+
+                <div class="trade-panel">
+                    <h3>상대 거래</h3>
+                    <div id="other-trade-slots" class="trade-slots"></div>
+                    <div id="other-trade-lock-state">대기 중</div>
+                </div>
+            </div>
+
+            <div id="trade-modal-footer">
+                <button onclick="LockCurrentTrade()">확인</button>
+                <button onclick="CancelCurrentTrade()">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
 </body>
 </html>
