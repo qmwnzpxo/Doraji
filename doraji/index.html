@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>도라지 가챠 클릭커</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="login-section">
+        <button class="big-btn" onclick="Login()">구글 로그인</button>
+        <span id="user-info"></span>
+        <button onclick="Logout()" style="display:none;" id="logout-btn">로그아웃</button>
+    </div>
+
+    <div id="game-section" style="display:none;">
+        <div id="counter">0 / 10</div>
+
+        <div id="bar-container">
+            <div id="bar"></div>
+        </div>
+
+        <button class="big-btn" onclick="ButtonClick()">물 주기</button>
+    </div>
+    
+    <script type="module" src="main.js"></script>
+</body>
+</html>
