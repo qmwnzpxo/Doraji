@@ -18,6 +18,8 @@ let currentUser = null;
 let unsubscribeTradeRequests = null;    // 교환요청
 let unsubscribeActiveTrades = null;
 let currentTradeId = null;
+let unsubscribeMarket = null;
+let unsubscribeGold = null;
 ///////////////////////////////////////////////////////////////////////////////////////
 
 // 로그인 상태 감지 (페이지 열면 자동으로 로그인 유지)
@@ -27,7 +29,9 @@ onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         document.getElementById("user-info").innerText = " " + user.displayName;
         await ensureUserProfile(user);
+        listenMyGold();
         document.getElementById("login-btn").style.display = "none";
+        document.getElementById("user-menu").style.display = "inline-flex";
         document.getElementById("game-section").style.display = "flex";
         document.getElementById("friend-section").style.display = "block";
         myCollection = await loadData();
@@ -64,7 +68,14 @@ onAuthStateChanged(auth, async (user) => {
     }
     document.getElementById("active-trade-list").innerHTML = "";
 
+    if (unsubscribeGold) {
+        unsubscribeGold();
+        unsubscribeGold = null;
+    }
+    document.getElementById("gold-text").innerText = "0";
+
     document.getElementById("user-info").innerText = "";
+    document.getElementById("user-menu").style.display = "none";
     document.getElementById("login-btn").style.display = "inline-block";
     document.getElementById("game-section").style.display = "none";
     document.getElementById("logout-btn").style.display = "none";
@@ -340,7 +351,8 @@ async function ensureUserProfile(user) {
         await setDoc(userRef, {
             displayName: user.displayName || "이름없음",
             friendCode: user.uid.slice(0, 8),
-            friends: []
+            friends: [],
+            gold: 0
         });
     } else {
         const userData = userSnap.data();
@@ -355,6 +367,9 @@ async function ensureUserProfile(user) {
         if (!userData.friends) {
             updateData.friends = [];
         }
+        if (userData.gold === undefined) {
+            updateData.gold = 0;
+        }
 
         if (Object.keys(updateData).length > 0) {
             await setDoc(userRef, updateData, { merge: true });
@@ -365,6 +380,7 @@ async function ensureUserProfile(user) {
     const updatedData = updatedSnap.data();
 
     document.getElementById("my-friend-code").innerText = updatedData.friendCode;
+    document.getElementById("gold-text").innerText = updatedData.gold;
 }
 
 // 친구 요청 보내기 함수
@@ -1050,4 +1066,319 @@ window.CancelCurrentTrade = async function() {
     if (!currentTradeId) return;
     await CancelTrade(currentTradeId);
     CloseTradeModal();
+}
+
+// 장터 열기
+window.OpenMarketModal = function() {
+    document.getElementById("market-modal").style.display = "flex";
+    renderMarketMyItems();
+    listenMarketItems();
+}
+
+// 장터 닫기
+window.CloseMarketModal = function() {
+    document.getElementById("market-modal").style.display = "none";
+}
+
+// 장터 판매 등록 함수
+async function registerSelectedDorajiForMarket(dorajiId) {
+    if (!currentUser) return;
+
+    if (!hasDoraji(myCollection, dorajiId, 1)) {
+        alert("해당 도라지를 가지고 있지 않습니다.");
+        return;
+    }
+
+    const doraji = dorajiList.find(d => d.id === dorajiId);
+    if (!doraji) {
+        alert("도라지 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    const priceInput = prompt(`${doraji.name}의 판매 가격을 입력하세요.`);
+    if (!priceInput) return;
+
+    const price = Number(priceInput);
+    if (Number.isNaN(price) || price <= 0) {
+        alert("올바른 가격을 입력하세요.");
+        return;
+    }
+
+    const newCollection = removeOneDoraji(myCollection, dorajiId);
+
+    const userRef = doc(db, "users", currentUser.uid);
+    const batch = writeBatch(db);
+
+    batch.set(userRef, { collection: newCollection }, { merge: true });
+    batch.set(doc(collection(db, "marketTrades")), {
+        sellerUid: currentUser.uid,
+        sellerName: currentUser.displayName || "이름없음",
+        dorajiId,
+        dorajiData: doraji,
+        price,
+        status: "listed",
+        createdAt: serverTimestamp()
+    });
+
+    await batch.commit();
+
+    myCollection = newCollection;
+    renderCollection();
+    renderMarketMyItems();
+
+    alert("장터에 등록했습니다.");
+}
+
+// 장터 실시간 목록 표시 함수
+function listenMarketItems() {
+    const container = document.getElementById("market-list");
+    if (!container) return;
+
+    if (unsubscribeMarket) {
+        unsubscribeMarket();
+    }
+
+    const q = query(
+        collection(db, "marketTrades"),
+        where("status", "==", "listed")
+    );
+
+    unsubscribeMarket = onSnapshot(q, (snap) => {
+        container.innerHTML = "";
+
+        if (snap.empty) {
+            container.innerText = "등록된 판매글 없음";
+            return;
+        }
+
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const doraji = dorajiList.find(d => d.id === data.dorajiId);
+
+            const row = document.createElement("div");
+            row.className = "market-item";
+
+            row.innerHTML = `
+                <div><strong>판매자:</strong> ${data.sellerName}</div>
+                <div><strong>도라지:</strong> ${doraji ? doraji.name : data.dorajiId}</div>
+                <div><strong>가격:</strong> ${data.price} G</div>
+                ${
+                    data.sellerUid === currentUser.uid
+                    ? `<button onclick="CancelMarketItem('${docSnap.id}')">등록 취소</button>`
+                    : `<button onclick="BuyMarketItem('${docSnap.id}')">구매</button>`
+                }
+            `;
+
+            container.appendChild(row);
+        });
+    });
+}
+
+// 등록 취소 함수
+window.CancelMarketItem = async function(marketId) {
+    if (!currentUser) return;
+
+    const marketRef = doc(db, "marketTrades", marketId);
+    const marketSnap = await getDoc(marketRef);
+
+    if (!marketSnap.exists()) return;
+
+    const marketData = marketSnap.data();
+
+    if (marketData.sellerUid !== currentUser.uid) {
+        alert("본인 판매글만 취소할 수 있습니다.");
+        return;
+    }
+
+    if (marketData.status !== "listed") {
+        alert("이미 처리된 판매글입니다.");
+        return;
+    }
+
+    const userRef = doc(db, "users", currentUser.uid);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return;
+
+    const userData = userSnap.data();
+    const currentCollection = userData.collection || [];
+    const doraji = marketData.dorajiData || dorajiList.find(d => d.id === marketData.dorajiId);
+
+    const newCollection = [...currentCollection];
+    if (doraji) {
+        newCollection.push(doraji);
+    }
+
+    const batch = writeBatch(db);
+    batch.set(userRef, { collection: newCollection }, { merge: true });
+    batch.update(marketRef, { status: "cancelled" });
+
+    await batch.commit();
+
+    myCollection = newCollection;
+    renderCollection();
+    renderMarketMyItems();
+
+    alert("판매글을 취소했습니다.");
+}
+
+// 장터에서 아이템 구매 함수
+window.BuyMarketItem = async function(marketId) {
+    if (!currentUser) return;
+
+    const marketRef = doc(db, "marketTrades", marketId);
+    const marketSnap = await getDoc(marketRef);
+
+    if (!marketSnap.exists()) {
+        alert("판매글을 찾을 수 없습니다.");
+        return;
+    }
+
+    const marketData = marketSnap.data();
+
+    if (marketData.status !== "listed") {
+        alert("이미 판매 완료되었거나 취소된 글입니다.");
+        return;
+    }
+
+    if (marketData.sellerUid === currentUser.uid) {
+        alert("자기 판매글은 구매할 수 없습니다.");
+        return;
+    }
+
+    const sellerRef = doc(db, "users", marketData.sellerUid);
+    const buyerRef = doc(db, "users", currentUser.uid);
+
+    const sellerSnap = await getDoc(sellerRef);
+    const buyerSnap = await getDoc(buyerRef);
+
+    if (!sellerSnap.exists() || !buyerSnap.exists()) {
+        alert("유저 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    const sellerData = sellerSnap.data();
+    const buyerData = buyerSnap.data();
+
+    let buyerCollection = buyerData.collection || [];
+    let sellerGold = sellerData.gold ?? 0;
+    let buyerGold = buyerData.gold ?? 0;
+
+    if (buyerGold < marketData.price) {
+        alert("골드가 부족합니다.");
+        return;
+    }
+
+    const doraji = marketData.dorajiData || dorajiList.find(d => d.id === marketData.dorajiId);
+    if (!doraji) {
+        alert("도라지 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    buyerCollection = [...buyerCollection, doraji];
+    sellerGold += marketData.price;
+    buyerGold -= marketData.price;
+
+    const batch = writeBatch(db);
+
+    batch.set(sellerRef, { gold: sellerGold }, { merge: true });
+    batch.set(buyerRef, {
+        collection: buyerCollection,
+        gold: buyerGold
+    }, { merge: true });
+
+    batch.update(marketRef, { status: "sold" });
+
+    await batch.commit();
+
+    myCollection = buyerCollection;
+    renderCollection();
+    renderMarketMyItems();
+
+    alert("구매가 완료되었습니다.");
+}
+
+// 장터 팝업 닫을 때 리스너 끊기
+window.CloseMarketModal = function() {
+    document.getElementById("market-modal").style.display = "none";
+
+    if (unsubscribeMarket) {
+        unsubscribeMarket();
+        unsubscribeMarket = null;
+    }
+}
+
+// 골드 불러오기 함수
+async function refreshGold() {
+    if (!currentUser) return;
+
+    const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+    if (!userSnap.exists()) return;
+
+    const userData = userSnap.data();
+    document.getElementById("gold-text").innerText = userData.gold ?? 0;
+}
+
+// 골드 추가
+async function addGold(amount) {
+    if (!currentUser) return;
+
+    const userRef = doc(db, "users", currentUser.uid);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return;
+
+    const userData = userSnap.data();
+    const currentGold = userData.gold ?? 0;
+
+    await setDoc(userRef, {
+        gold: currentGold + amount
+    }, { merge: true });
+
+    await refreshGold();
+}
+
+// 내 유저 문서를 실시간으로 듣는 함수
+function listenMyGold() {
+    if (!currentUser) return;
+
+    if (unsubscribeGold) {
+        unsubscribeGold();
+    }
+
+    const userRef = doc(db, "users", currentUser.uid);
+
+    unsubscribeGold = onSnapshot(userRef, (snap) => {
+        if (!snap.exists()) return;
+
+        const userData = snap.data();
+        document.getElementById("gold-text").innerText = userData.gold ?? 0;
+    });
+}
+
+// 판매 가능한 도라지 렌더링하는 함수
+function renderMarketMyItems() {
+    const container = document.getElementById("market-my-items");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const grouped = getGroupedCollection(myCollection);
+
+    if (grouped.length === 0) {
+        container.innerText = "판매할 도라지가 없습니다.";
+        return;
+    }
+
+    grouped.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "market-my-item";
+        card.innerHTML = `
+            <img src="${item.img}">
+            <div>${item.name}</div>
+            <div>x${item.count}</div>
+        `;
+
+        card.onclick = () => registerSelectedDorajiForMarket(item.id);
+
+        container.appendChild(card);
+    });
 }

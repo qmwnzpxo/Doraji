@@ -9,9 +9,16 @@
 
 <body>
     <div id="top-bar">
-        <button id="login-btn" class="big-btn" onclick="Login()">구글 로그인</button>
-        <span id="user-info"></span>
-        <button onclick="Logout()" style="display:none;" id="logout-btn">로그아웃</button>
+        <div id="top-bar">
+            <button id="login-btn" class="big-btn" onclick="Login()">구글 로그인</button>
+
+            <div id="user-menu" style="display:none;">
+                <span id="user-info"></span>
+                <button onclick="Logout()" id="logout-btn">로그아웃</button>
+                <button onclick="OpenMarketModal()">장터</button>
+                <span>골드: <span id="gold-text">0</span></span>
+            </div>
+        </div>
     </div>
 
     <div id="main-layout">
@@ -98,6 +105,25 @@
             <div id="trade-modal-footer">
                 <button onclick="LockCurrentTrade()">확인</button>
                 <button onclick="CancelCurrentTrade()">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="market-modal" style="display:none;">
+        <div id="market-modal-content">
+            <div id="market-modal-header">
+                <span>장터</span>
+                <button onclick="CloseMarketModal()">X</button>
+            </div>
+
+            <div id="market-register">
+                <h3>판매 등록</h3>
+                <div id="market-my-items"></div>
+            </div>
+
+            <div id="market-list-section">
+                <h3>판매 목록</h3>
+                <div id="market-list"></div>
             </div>
         </div>
     </div>
