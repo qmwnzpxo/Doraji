@@ -16,7 +16,9 @@ onAuthStateChanged(auth, async (user) => {
         document.getElementById("login-section").querySelector("button").style.display = "none";
         document.getElementById("game-section").style.display = "block";
         myCollection = await loadData();
+        updateMaxCountByTime();
         renderCollection();
+        startAutoGrow();
         document.getElementById("logout-btn").style.display = "inline";
     } else {
     currentUser = null;
@@ -65,7 +67,7 @@ let currentUser = null;
 let isRolling = false;
 
 // 버튼 함수
-window.ButtonClick = function() {
+window.ButtonClick = async function() {
     if (isRolling) return;
     if (!currentUser) {
         alert("로그인 먼저 해주세요!");
@@ -75,32 +77,12 @@ window.ButtonClick = function() {
         count++;
         document.getElementById("counter").innerText = count + " / " + maxCount;
         document.getElementById("bar").style.width = (count / maxCount) * 100 + "%";
-        if (count == maxCount) {
-            (async () => {
-                isRolling = true;
-
-                try {
-                    count = 0;
-                    document.getElementById("counter").innerText = "0 / " + maxCount;
-                    document.getElementById("bar").style.width = "0%";
-
-                    const newDoraji = getRandomDoraji();
-                    if(newDoraji){
-                        myCollection.push(newDoraji);
-                        await saveData(myCollection);
-                        await showPopup(newDoraji);
-                        renderCollection();
-                    }
-                } catch (e) {
-                    console.error("롤링 중 에러:", e);
-                } finally {
-                    isRolling = false;
-                }
-            })();
-        }
+        if (count == maxCount)
+            await tryRoll();
     }
 }
 
+// ui 업데이트 함수
 function renderCollection() {
     const container = document.getElementById("collection");
     if (!container) return;
@@ -209,6 +191,7 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// 도라지 뽑았을 때 팝업 띄우는 함수
 async function showPopup(doraji) {
     const popup = document.getElementById("popup");
     const img = document.getElementById("popup-img");
@@ -228,4 +211,80 @@ async function showPopup(doraji) {
     popup.style.display = "block";
     await delay(2000);
     popup.style.display = "none";
+}
+
+let autoInterval = null;
+
+// 1초에 카운트가 1씩 자동으로 올라가는 방치형 용 함수
+function startAutoGrow() {
+    if (autoInterval) return;
+
+    autoInterval = setInterval(async () => {
+        if (!currentUser) return;
+
+        updateMaxCountByTime();
+
+        if (isRolling) return;
+
+        if (count < maxCount) {
+            count++;
+            document.getElementById("counter").innerText = count + " / " + maxCount;
+            document.getElementById("bar").style.width = (count / maxCount) * 100 + "%";
+        }
+
+        if (count == maxCount) {
+            await tryRoll();
+        }
+    }, 1000);
+}
+
+// count가 다 찬 뒤 도라지가 뽑히는 함수
+async function tryRoll() {
+    if (isRolling) return;
+    if (!currentUser) return;
+    if (count < maxCount) return;
+
+    isRolling = true;
+
+    try {
+        count = 0;
+        document.getElementById("counter").innerText = "0 / " + maxCount;
+        document.getElementById("bar").style.width = "0%";
+
+        const newDoraji = getRandomDoraji();
+        if (newDoraji) {
+            myCollection.push(newDoraji);
+            await saveData(myCollection);
+            await showPopup(newDoraji);
+            renderCollection();
+        }
+    } catch (e) {
+        console.error("롤링 중 에러:", e);
+    } finally {
+        isRolling = false;
+    }
+}
+
+// 현재 시각에 따라 낮과 밤이 바뀌어 maxCount가 바뀌는 함수
+function updateMaxCountByTime() {
+    const now = new Date();
+    const hour = now.getHours();
+
+    let newMax;
+
+    if (hour >= 6 && hour < 18) {
+        newMax = 10;
+    } else {
+        newMax = 100;
+    }
+
+    // maxCount가 바뀌었을 때만 처리
+    if (maxCount !== newMax) {
+        maxCount = newMax;
+
+        // count가 max보다 크면 맞춰주기
+        if (count > maxCount) {
+            count = maxCount;
+        }
+    }
 }
