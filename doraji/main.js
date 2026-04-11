@@ -8,8 +8,8 @@ import {
     doc, getDoc, setDoc, updateDoc,
     collection, addDoc, getDocs, query, where,
     arrayUnion, arrayRemove, serverTimestamp, writeBatch, onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
-import { signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 
 /////////////////////////////// 로그인, 친구 관련 변수 공간 ///////////////////////////////
 let unsubscribeFriendRequests = null;   // 친구요청
@@ -102,7 +102,7 @@ async function loadData() {
     const docRef = doc(db, "users", currentUser.uid);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-        return docSnap.data().collection;
+        return docSnap.data().collection || [];  // ← || [] 추가
     } else {
         return [];
     }
