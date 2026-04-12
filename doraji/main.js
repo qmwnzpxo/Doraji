@@ -22,7 +22,7 @@ let unsubscribeMarket = null;
 let unsubscribeGold = null;
 let myGold = 0;
 let marketCurrentPage = 1;
-const MARKET_ITEMS_PER_PAGE = 20;
+const MARKET_ITEMS_PER_PAGE = 7;
 ///////////////////////////////////////////////////////////////////////////////////////
 
 // 로그인 상태 감지 (페이지 열면 자동으로 로그인 유지)
