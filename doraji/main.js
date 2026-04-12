@@ -1570,6 +1570,8 @@ window.BuyMarketItem = async function(marketId) {
     alert("구매가 완료되었습니다.");
 }
 
+
+
 // 장터 팝업 닫을 때 리스너 끊기
 window.CloseMarketModal = function() {
     document.getElementById("market-modal").style.display = "none";
@@ -1657,3 +1659,165 @@ function renderMarketMyItems() {
     });
 }
 
+
+/////////////////////////////////////////////////
+/// 시스템 상점 (도라지 → 골드 판매)
+////////////////////////////////////////////////
+
+const SHOP_SELL_PRICES = {
+    common: 10,
+    epic: 50,
+    rare: 200,
+    superRare: 500,
+};
+
+// 상점 모달 열기
+window.OpenShopModal = function() {
+    if (!currentUser) {
+        alert("로그인 먼저 해주세요!");
+        return;
+    }
+    document.getElementById("shop-modal").style.display = "flex";
+    renderShopItems();
+}
+
+// 상점 모달 닫기
+window.CloseShopModal = function() {
+    document.getElementById("shop-modal").style.display = "none";
+}
+
+// 상점 아이템 목록 렌더링
+function renderShopItems() {
+    const container = document.getElementById("shop-item-list");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const grouped = getGroupedCollection(myCollection);
+
+    if (grouped.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "shop-empty";
+        empty.innerText = "판매할 도라지가 없습니다.";
+        container.appendChild(empty);
+        return;
+    }
+
+    grouped.forEach(item => {
+        const price = SHOP_SELL_PRICES[item.grade] ?? 0;
+        const inputId = `shop-qty-${item.id}`;
+
+        const card = document.createElement("div");
+        card.className = "shop-item-card";
+        card.innerHTML = `
+            <img src="${item.img}" alt="${item.name}">
+            <div class="shop-item-name">${item.name}</div>
+            <div class="shop-item-count">보유: x${item.count}</div>
+            <div class="shop-item-price">${price} G / 개</div>
+            <div class="shop-qty-row">
+                <button class="shop-qty-btn" onclick="ShopQtyAdjust(${item.id}, -1)">−</button>
+                <input id="${inputId}" class="shop-qty-input" type="number" value="1" min="1" max="${item.count}">
+                <button class="shop-qty-btn" onclick="ShopQtyAdjust(${item.id}, 1)">+</button>
+                <button class="shop-qty-btn shop-qty-max" onclick="ShopQtyMax(${item.id}, ${item.count})">MAX</button>
+            </div>
+            <div class="shop-total-price" id="shop-total-${item.id}">${price} G</div>
+            <button class="shop-sell-btn" onclick="SellDorajiToShop(${item.id})">판매</button>
+        `;
+
+        // 수량 변경 시 합계 금액 실시간 갱신
+        card.querySelector(`#${inputId}`).addEventListener("input", () => {
+            updateShopTotal(item.id, price, item.count);
+        });
+
+        container.appendChild(card);
+    });
+}
+
+// 수량 ± 버튼
+window.ShopQtyAdjust = function(dorajiId, delta) {
+    const input = document.getElementById(`shop-qty-${dorajiId}`);
+    if (!input) return;
+    const max = parseInt(input.max);
+    let val = parseInt(input.value) + delta;
+    val = Math.max(1, Math.min(max, val));
+    input.value = val;
+
+    const doraji = dorajiList.find(d => d.id === dorajiId);
+    if (doraji) updateShopTotal(dorajiId, SHOP_SELL_PRICES[doraji.grade] ?? 0, max);
+}
+
+// MAX 버튼
+window.ShopQtyMax = function(dorajiId, maxCount) {
+    const input = document.getElementById(`shop-qty-${dorajiId}`);
+    if (!input) return;
+    input.value = maxCount;
+
+    const doraji = dorajiList.find(d => d.id === dorajiId);
+    if (doraji) updateShopTotal(dorajiId, SHOP_SELL_PRICES[doraji.grade] ?? 0, maxCount);
+}
+
+// 합계 금액 갱신
+function updateShopTotal(dorajiId, pricePerItem, maxCount) {
+    const input = document.getElementById(`shop-qty-${dorajiId}`);
+    const totalEl = document.getElementById(`shop-total-${dorajiId}`);
+    if (!input || !totalEl) return;
+
+    let qty = parseInt(input.value);
+    if (isNaN(qty) || qty < 1) qty = 1;
+    if (qty > maxCount) qty = maxCount;
+    input.value = qty;
+
+    totalEl.innerText = `${pricePerItem * qty} G`;
+}
+
+// 도라지 판매 (수량 선택)
+window.SellDorajiToShop = async function(dorajiId) {
+    if (!currentUser) return;
+
+    const doraji = dorajiList.find(d => d.id === dorajiId);
+    if (!doraji) return;
+
+    const pricePerItem = SHOP_SELL_PRICES[doraji.grade] ?? 0;
+
+    const input = document.getElementById(`shop-qty-${dorajiId}`);
+    const qty = input ? Math.max(1, parseInt(input.value) || 1) : 1;
+    const totalPrice = pricePerItem * qty;
+
+    if (!confirm(`${doraji.name} ${qty}개를 ${totalPrice}G에 판매하시겠습니까?`)) return;
+
+    // 컬렉션에서 qty개 제거
+    const newCollection = [...myCollection];
+    let removed = 0;
+    for (let i = newCollection.length - 1; i >= 0 && removed < qty; i--) {
+        if (newCollection[i].id === dorajiId) {
+            newCollection.splice(i, 1);
+            removed++;
+        }
+    }
+
+    if (removed < qty) {
+        alert("보유 수량이 부족합니다.");
+        return;
+    }
+
+    const userRef = doc(db, "users", currentUser.uid);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return;
+
+    const userData = userSnap.data();
+    const newGold = (userData.gold ?? 0) + totalPrice;
+
+    const batch = writeBatch(db);
+    batch.set(userRef, {
+        collection: newCollection,
+        gold: newGold
+    }, { merge: true });
+
+    await batch.commit();
+
+    myCollection = newCollection;
+    renderCollection();
+    renderShopItems();
+
+    alert(`${doraji.name} ${qty}개를 ${totalPrice}G에 판매했습니다!`);
+}
