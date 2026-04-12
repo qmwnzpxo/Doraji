@@ -1,6 +1,13 @@
 body {
     margin: 0;
     padding: 20px;
+    box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: inherit;
 }
 
 .big-btn {
@@ -104,7 +111,6 @@ body {
     padding: 10px;
     text-align: center;
     background: #f9f9f9;
-    box-sizing: border-box;
 }
 
 .doraji-card img {
@@ -134,6 +140,10 @@ body {
     font-size: 14px;
 }
 
+/* =========================
+   교환 모달
+========================= */
+
 #trade-modal {
     position: fixed;
     inset: 0;
@@ -142,22 +152,30 @@ body {
     justify-content: center;
     align-items: center;
     z-index: 9999;
+    padding: 20px;
 }
 
 #trade-modal-content {
     width: 900px;
     max-width: 95vw;
+    max-height: 90vh;
     background: white;
     border-radius: 16px;
-    box-shadow: 0 0 30px rgba(0,0,0,0.3);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
     padding: 20px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    overflow: hidden;
 }
 
 #trade-modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    flex-shrink: 0;
 }
 
 #trade-modal-header button {
@@ -165,11 +183,55 @@ body {
     padding: 6px 12px;
 }
 
+#trade-my-item-list {
+    border: 1px solid #ccc;
+    border-radius: 12px;
+    padding: 12px;
+    background: #f8f8f8;
+
+    max-height: 300px;
+    overflow-y: auto;
+
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+
+    flex-shrink: 0;
+    min-height: 0;
+}
+
+.trade-select-item {
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+    background: white;
+    cursor: pointer;
+}
+
+.trade-select-item:hover {
+    background: #f0f0f0;
+}
+
+.trade-select-item img {
+    width: 70px;
+    height: 70px;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto 8px;
+}
+
+.trade-select-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 #trade-modal-body {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     gap: 20px;
+    flex-shrink: 0;
 }
 
 .trade-panel {
@@ -178,12 +240,14 @@ body {
     border-radius: 12px;
     padding: 16px;
     background: #f8f8f8;
+    min-width: 0;
 }
 
 .trade-center {
     font-size: 40px;
     font-weight: bold;
     align-self: center;
+    flex-shrink: 0;
 }
 
 .trade-slots {
@@ -196,6 +260,8 @@ body {
     border: 1px dashed #bbb;
     border-radius: 10px;
     background: white;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 .trade-slot {
@@ -205,7 +271,6 @@ body {
     padding: 8px;
     text-align: center;
     background: #fafafa;
-    box-sizing: border-box;
 }
 
 .trade-slot img {
@@ -219,13 +284,17 @@ body {
     display: flex;
     justify-content: center;
     gap: 12px;
-    margin-top: 20px;
+    flex-shrink: 0;
 }
 
 #trade-modal-footer button {
     font-size: 18px;
     padding: 10px 18px;
 }
+
+/* =========================
+   장터 모달
+========================= */
 
 #market-modal {
     position: fixed;
@@ -235,6 +304,7 @@ body {
     justify-content: center;
     align-items: center;
     z-index: 9999;
+    padding: 20px;
 }
 
 #market-modal-content {
@@ -244,7 +314,7 @@ body {
     overflow-y: auto;
     background: white;
     border-radius: 16px;
-    box-shadow: 0 0 30px rgba(0,0,0,0.3);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
     padding: 20px;
 }
 
@@ -283,7 +353,6 @@ body {
     text-align: center;
     background: #f9f9f9;
     cursor: pointer;
-    box-sizing: border-box;
 }
 
 .market-my-item:hover {
@@ -295,4 +364,39 @@ body {
     height: 80px;
     object-fit: contain;
     margin-bottom: 8px;
+}
+
+#market-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
+    align-items: center;
+}
+
+#market-controls input,
+#market-controls select {
+    padding: 6px;
+}
+
+#market-controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#market-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+#market-pagination button {
+    padding: 6px 12px;
+}
+
+#market-page-info {
+    font-weight: bold;
 }
